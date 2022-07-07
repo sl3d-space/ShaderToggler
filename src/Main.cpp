@@ -391,28 +391,11 @@ bool blockDrawCallForCommandList(command_list* commandList)
 	return blockCall;
 }
 
-void onInitEffectRuntime(effect_runtime* runtime)
-{
-	DeviceDataContainer& deviceData = runtime->get_device()->get_private_data<DeviceDataContainer>();
-}
-
 void onReshadeBeginEffects(reshade::api::effect_runtime* runtime, reshade::api::command_list* cmd_list, reshade::api::resource_view rtv, reshade::api::resource_view rtv_srgb)
 {
 	DeviceDataContainer& deviceData = cmd_list->get_device()->get_private_data<DeviceDataContainer>();
 	target_technique = runtime->find_technique(target_effect_name.c_str(), target_technique_name.c_str());
 	runtime->set_technique_state(target_technique, !deviceData.target_shader_active_last_frame);
-}
-
-static void toggleDepth3D(bool enabled)
-{
-	static bool prev = !enabled;
-	if (active_runtime != nullptr && enabled != prev)
-	{
-		reshade::log_message(2, enabled ? "TOGGLE DEPTH ON" : "TOGGLE DEPTH OFF");
-		target_technique = active_runtime->find_technique(target_effect_name.c_str(), target_technique_name.c_str());
-		active_runtime->set_technique_state(target_technique, enabled);
-		prev = enabled;
-	}
 }
 
 static void onPresent(reshade::api::command_queue* queue, swapchain* swapchain,
@@ -428,18 +411,14 @@ static void onPresent(reshade::api::command_queue* queue, swapchain* swapchain,
 static bool onDraw(command_list* commandList, uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex, uint32_t first_instance)
 {
 	// check if for this command list the active shader handles are part of the blocked set. If so, return true
-	bool blockDrawCall = blockDrawCallForCommandList(commandList);
-	//toggleDepth3D (!blockDrawCall);
-	return blockDrawCall; // diable visibility toggling of marked shaders
+	return blockDrawCallForCommandList(commandList);
 }
 
 
 static bool onDrawIndexed(command_list* commandList, uint32_t index_count, uint32_t instance_count, uint32_t first_index, int32_t vertex_offset, uint32_t first_instance)
 {
 	// same as onDraw
-	bool blockDrawCall = blockDrawCallForCommandList(commandList);
-	//toggleDepth3D(!blockDrawCall);
-	return blockDrawCall; // diable visibility toggling of marked shaders
+	return blockDrawCallForCommandList(commandList);
 }
 
 
@@ -451,9 +430,7 @@ static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command
 		case indirect_command::draw:
 		case indirect_command::draw_indexed: 
 			// same as OnDraw
-			bool blockDrawCall = blockDrawCallForCommandList(commandList);
-			//toggleDepth3D(!blockDrawCall);
-			return blockDrawCall; // diable visibility toggling of marked shaders
+			return blockDrawCallForCommandList(commandList);
 			// the rest aren't blocked
 	}
 	return false;
@@ -792,7 +769,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 		}
 		reshade::register_event<reshade::addon_event::init_device>(onInitDevice);
 		reshade::register_event<reshade::addon_event::destroy_device>(onDestroyDevice);
-		reshade::register_event<reshade::addon_event::init_effect_runtime>(onInitEffectRuntime);
 		reshade::register_event<reshade::addon_event::reshade_begin_effects>(onReshadeBeginEffects);
 		reshade::register_event<reshade::addon_event::present>(onPresent);
 		reshade::register_event<reshade::addon_event::init_pipeline>(onInitPipeline);
@@ -812,7 +788,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 	case DLL_PROCESS_DETACH:
 		reshade::unregister_event<reshade::addon_event::init_device>(onInitDevice);
 		reshade::unregister_event<reshade::addon_event::destroy_device>(onDestroyDevice);
-		reshade::unregister_event<reshade::addon_event::init_effect_runtime>(onInitEffectRuntime);
 		reshade::unregister_event<reshade::addon_event::reshade_begin_effects>(onReshadeBeginEffects);
 		reshade::unregister_event<reshade::addon_event::present>(onPresent);
 		reshade::unregister_event<reshade::addon_event::reshade_present>(onReshadePresent);
