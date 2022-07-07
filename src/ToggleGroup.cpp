@@ -84,13 +84,13 @@ namespace ShaderToggler
 
 	bool ToggleGroup::isBlockedVertexShader(uint32_t shaderHash)
 	{
-		return _isActive && (_vertexShaderHashes.count(shaderHash)==1);
+		return (_vertexShaderHashes.count(shaderHash)==1);
 	}
 
 
 	bool ToggleGroup::isBlockedPixelShader(uint32_t shaderHash)
 	{
-		return _isActive && (_pixelShaderHashes.count(shaderHash)==1);
+		return (_pixelShaderHashes.count(shaderHash)==1);
 	}
 
 

@@ -52,6 +52,12 @@ struct __declspec(uuid("038B03AA-4C75-443B-A695-752D80797037")) CommandListDataC
     uint64_t activeVertexShaderPipeline;
 };
 
+struct __declspec(uuid("C63E95B1-4E2F-46D6-A276-E8B4612C069A")) DeviceDataContainer {
+	effect_runtime* current_runtime = nullptr;
+	bool target_shader_active = false;
+};
+
+
 #define FRAMECOUNT_COLLECTION_PHASE_DEFAULT 250;
 #define HASH_FILE_NAME	"ShaderToggler.ini"
 
@@ -64,7 +70,21 @@ static atomic_int g_toggleGroupIdKeyBindingEditing = -1;
 static atomic_int g_toggleGroupIdShaderEditing = -1;
 static float g_overlayOpacity = 1.0f;
 static int g_startValueFramecountCollectionPhase = FRAMECOUNT_COLLECTION_PHASE_DEFAULT;
+static std::shared_mutex s_mutex;
 
+static effect_runtime* active_runtime;
+static effect_technique target_technique;
+static string target_effect_name = "SuperDepth3D.fx";
+static string target_technique_name = "SuperDepth3D";
+
+static bool get_config_string(effect_runtime* runtime, const char* section, const char* key, std::string& value)
+{
+	char value_string[32] = ""; size_t value_length = sizeof(value_string) - 1;
+	if (!reshade::config_get_value(runtime, section, key, value_string, &value_length))
+		return false;
+	value = value_string;
+	return true;
+}
 
 /// <summary>
 /// Calculates a crc32 hash from the passed in shader bytecode. The hash is used to identity the shader in future runs.
@@ -148,6 +168,18 @@ void saveShaderTogglerIniFile()
 	}
 	iniFile.SetFileName(HASH_FILE_NAME);
 	iniFile.Save();
+}
+
+static void onInitDevice(device* device)
+{
+	/*get_config_string(nullptr, "General", "TargetEffectName", target_effect_name);
+	get_config_string(nullptr, "General", "TargetTechniqueName", target_technique_name);*/
+	device->create_private_data<DeviceDataContainer>();
+}
+
+static void onDestroyDevice(device* device)
+{
+	device->destroy_private_data<DeviceDataContainer>();
 }
 
 
@@ -340,6 +372,7 @@ bool blockDrawCallForCommandList(command_list* commandList)
 	}
 
 	const CommandListDataContainer &commandListData = commandList->get_private_data<CommandListDataContainer>();
+	DeviceDataContainer& deviceData = commandList->get_device()->get_private_data<DeviceDataContainer>();
 	uint32_t shaderHash = g_pixelShaderManager.getShaderHash(commandListData.activePixelShaderPipeline);
 	bool blockCall = g_pixelShaderManager.isBlockedShader(shaderHash);
 	for(auto& group : g_toggleGroups)
@@ -352,21 +385,59 @@ bool blockDrawCallForCommandList(command_list* commandList)
 	{
 		blockCall |= group.isBlockedVertexShader(shaderHash);
 	}
+	if (blockCall)
+		deviceData.target_shader_active = true;
 	return blockCall;
 }
 
+void onInitEffectRuntime(effect_runtime* runtime)
+{
+	DeviceDataContainer& deviceData = runtime->get_device()->get_private_data<DeviceDataContainer>();
+}
+
+void onReshadeBeginEffects(reshade::api::effect_runtime* runtime, reshade::api::command_list* cmd_list, reshade::api::resource_view rtv, reshade::api::resource_view rtv_srgb)
+{
+	DeviceDataContainer& deviceData = cmd_list->get_device()->get_private_data<DeviceDataContainer>();
+	target_technique = runtime->find_technique(target_effect_name.c_str(), target_technique_name.c_str());
+	runtime->set_technique_state(target_technique, !deviceData.target_shader_active);
+}
+
+static void toggleDepth3D(bool enabled)
+{
+	static bool prev = !enabled;
+	if (active_runtime != nullptr && enabled != prev)
+	{
+		reshade::log_message(2, enabled ? "TOGGLE DEPTH ON" : "TOGGLE DEPTH OFF");
+		target_technique = active_runtime->find_technique(target_effect_name.c_str(), target_technique_name.c_str());
+		active_runtime->set_technique_state(target_technique, enabled);
+		prev = enabled;
+	}
+}
+
+static void onPresent(reshade::api::command_queue* queue, swapchain* swapchain,
+	const reshade::api::rect* source_rect, const reshade::api::rect* dest_rect, uint32_t dirty_rect_count, const reshade::api::rect* dirty_rects)
+{
+	std::unique_lock lock(s_mutex);
+	DeviceDataContainer& deviceData = queue->get_device()->get_private_data<DeviceDataContainer>();
+	deviceData.target_shader_active = false;
+}
+	
 
 static bool onDraw(command_list* commandList, uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex, uint32_t first_instance)
 {
 	// check if for this command list the active shader handles are part of the blocked set. If so, return true
-	return blockDrawCallForCommandList(commandList);
+	bool blockDrawCall = blockDrawCallForCommandList(commandList);
+	//toggleDepth3D (!blockDrawCall);
+	return blockDrawCall; // diable visibility toggling of marked shaders
 }
 
 
 static bool onDrawIndexed(command_list* commandList, uint32_t index_count, uint32_t instance_count, uint32_t first_index, int32_t vertex_offset, uint32_t first_instance)
 {
 	// same as onDraw
-	return blockDrawCallForCommandList(commandList);
+	bool blockDrawCall = blockDrawCallForCommandList(commandList);
+	//toggleDepth3D(!blockDrawCall);
+	return blockDrawCall; // diable visibility toggling of marked shaders
 }
 
 
@@ -378,8 +449,10 @@ static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command
 		case indirect_command::draw:
 		case indirect_command::draw_indexed: 
 			// same as OnDraw
-			return blockDrawCallForCommandList(commandList);
-		// the rest aren't blocked
+			bool blockDrawCall = blockDrawCallForCommandList(commandList);
+			//toggleDepth3D(!blockDrawCall);
+			return blockDrawCall; // diable visibility toggling of marked shaders
+			// the rest aren't blocked
 	}
 	return false;
 }
@@ -715,6 +788,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 		{
 			return FALSE;
 		}
+		reshade::register_event<reshade::addon_event::init_device>(onInitDevice);
+		reshade::register_event<reshade::addon_event::destroy_device>(onDestroyDevice);
+		reshade::register_event<reshade::addon_event::init_effect_runtime>(onInitEffectRuntime);
+		reshade::register_event<reshade::addon_event::reshade_begin_effects>(onReshadeBeginEffects);
+		reshade::register_event<reshade::addon_event::present>(onPresent);
 		reshade::register_event<reshade::addon_event::init_pipeline>(onInitPipeline);
 		reshade::register_event<reshade::addon_event::init_command_list>(onInitCommandList);
 		reshade::register_event<reshade::addon_event::destroy_command_list>(onDestroyCommandList);
@@ -730,6 +808,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD fdwReason, LPVOID)
 		loadShaderTogglerIniFile();
 		break;
 	case DLL_PROCESS_DETACH:
+		reshade::unregister_event<reshade::addon_event::init_device>(onInitDevice);
+		reshade::unregister_event<reshade::addon_event::destroy_device>(onDestroyDevice);
+		reshade::unregister_event<reshade::addon_event::init_effect_runtime>(onInitEffectRuntime);
+		reshade::unregister_event<reshade::addon_event::reshade_begin_effects>(onReshadeBeginEffects);
+		reshade::unregister_event<reshade::addon_event::present>(onPresent);
 		reshade::unregister_event<reshade::addon_event::reshade_present>(onReshadePresent);
 		reshade::unregister_event<reshade::addon_event::destroy_pipeline>(onDestroyPipeline);
 		reshade::unregister_event<reshade::addon_event::init_pipeline>(onInitPipeline);
