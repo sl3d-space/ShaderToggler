@@ -55,6 +55,7 @@ struct __declspec(uuid("038B03AA-4C75-443B-A695-752D80797037")) CommandListDataC
 struct __declspec(uuid("C63E95B1-4E2F-46D6-A276-E8B4612C069A")) DeviceDataContainer {
 	effect_runtime* current_runtime = nullptr;
 	bool target_shader_active = false;
+	bool target_shader_active_last_frame = false;
 };
 
 
@@ -399,7 +400,7 @@ void onReshadeBeginEffects(reshade::api::effect_runtime* runtime, reshade::api::
 {
 	DeviceDataContainer& deviceData = cmd_list->get_device()->get_private_data<DeviceDataContainer>();
 	target_technique = runtime->find_technique(target_effect_name.c_str(), target_technique_name.c_str());
-	runtime->set_technique_state(target_technique, !deviceData.target_shader_active);
+	runtime->set_technique_state(target_technique, !deviceData.target_shader_active_last_frame);
 }
 
 static void toggleDepth3D(bool enabled)
@@ -419,6 +420,7 @@ static void onPresent(reshade::api::command_queue* queue, swapchain* swapchain,
 {
 	std::unique_lock lock(s_mutex);
 	DeviceDataContainer& deviceData = queue->get_device()->get_private_data<DeviceDataContainer>();
+	deviceData.target_shader_active_last_frame = deviceData.target_shader_active;
 	deviceData.target_shader_active = false;
 }
 	
