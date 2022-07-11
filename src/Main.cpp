@@ -77,6 +77,7 @@ static effect_runtime* active_runtime;
 static effect_technique target_technique;
 static string target_effect_name = "SuperDepth3D.fx";
 static string target_technique_name = "SuperDepth3D";
+static bool should_hide_marked_shaders = false;
 
 static bool get_config_string(effect_runtime* runtime, const char* section, const char* key, std::string& value)
 {
@@ -173,8 +174,9 @@ void saveShaderTogglerIniFile()
 
 static void onInitDevice(device* device)
 {
-	/*get_config_string(nullptr, "General", "TargetEffectName", target_effect_name);
-	get_config_string(nullptr, "General", "TargetTechniqueName", target_technique_name);*/
+	get_config_string(nullptr, "SHADERTOGGLER", "TargetEffectName", target_effect_name);
+	get_config_string(nullptr, "SHADERTOGGLER", "TargetTechniqueName", target_technique_name);
+	reshade::config_get_value(nullptr, "SHADERTOGGLER", "HideMarkedShaders", should_hide_marked_shaders);
 	device->create_private_data<DeviceDataContainer>();
 }
 
@@ -411,14 +413,16 @@ static void onPresent(reshade::api::command_queue* queue, swapchain* swapchain,
 static bool onDraw(command_list* commandList, uint32_t vertex_count, uint32_t instance_count, uint32_t first_vertex, uint32_t first_instance)
 {
 	// check if for this command list the active shader handles are part of the blocked set. If so, return true
-	return blockDrawCallForCommandList(commandList);
+	bool blockDrawCall = blockDrawCallForCommandList(commandList);
+	return blockDrawCall ? should_hide_marked_shaders : false;
 }
 
 
 static bool onDrawIndexed(command_list* commandList, uint32_t index_count, uint32_t instance_count, uint32_t first_index, int32_t vertex_offset, uint32_t first_instance)
 {
 	// same as onDraw
-	return blockDrawCallForCommandList(commandList);
+	bool blockDrawCall = blockDrawCallForCommandList(commandList);
+	return blockDrawCall ? should_hide_marked_shaders : false;
 }
 
 
@@ -430,7 +434,8 @@ static bool onDrawOrDispatchIndirect(command_list* commandList, indirect_command
 		case indirect_command::draw:
 		case indirect_command::draw_indexed: 
 			// same as OnDraw
-			return blockDrawCallForCommandList(commandList);
+			bool blockDrawCall = blockDrawCallForCommandList(commandList);
+			return blockDrawCall ? should_hide_marked_shaders : false;
 			// the rest aren't blocked
 	}
 	return false;
