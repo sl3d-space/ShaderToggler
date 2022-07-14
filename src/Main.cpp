@@ -40,6 +40,8 @@
 #include "CDataFile.h"
 #include "ToggleGroup.h"
 #include <vector>
+#include <unordered_map>
+#include <unordered_set>
 
 using namespace reshade::api;
 using namespace ShaderToggler;
@@ -56,6 +58,7 @@ struct __declspec(uuid("C63E95B1-4E2F-46D6-A276-E8B4612C069A")) DeviceDataContai
 	effect_runtime* current_runtime = nullptr;
 	bool target_shader_active = false;
 	bool target_shader_active_last_frame = false;
+	std::unordered_map<uintptr_t, unordered_set<uint32_t>> matched_shaders;
 };
 
 
@@ -374,21 +377,44 @@ bool blockDrawCallForCommandList(command_list* commandList)
 		return false;
 	}
 
-	const CommandListDataContainer &commandListData = commandList->get_private_data<CommandListDataContainer>();
+	CommandListDataContainer &commandListData = commandList->get_private_data<CommandListDataContainer>();
 	DeviceDataContainer& deviceData = commandList->get_device()->get_private_data<DeviceDataContainer>();
 	uint32_t shaderHash = g_pixelShaderManager.getShaderHash(commandListData.activePixelShaderPipeline);
 	bool blockCall = g_pixelShaderManager.isBlockedShader(shaderHash);
+	bool effectActive = false;
 	for(auto& group : g_toggleGroups)
 	{
-		blockCall |= group.isBlockedPixelShader(shaderHash);
+		uintptr_t groupHandle = reinterpret_cast<uintptr_t>(&group);
+		if (group.isBlockedPixelShader(shaderHash))
+		{
+			blockCall = true;
+			if (!deviceData.matched_shaders.contains(groupHandle))
+			{
+				deviceData.matched_shaders.emplace(groupHandle, unordered_set<uint32_t>());
+			}
+			deviceData.matched_shaders[groupHandle].insert(shaderHash);
+		}
 	}
 	shaderHash = g_vertexShaderManager.getShaderHash(commandListData.activeVertexShaderPipeline);
 	blockCall |= g_vertexShaderManager.isBlockedShader(shaderHash);
 	for(auto& group : g_toggleGroups)
 	{
-		blockCall |= group.isBlockedVertexShader(shaderHash);
+		uintptr_t groupHandle = reinterpret_cast<uintptr_t>(&group);
+		if (group.isBlockedVertexShader(shaderHash))
+		{
+			blockCall = true;
+			if (!deviceData.matched_shaders.contains(groupHandle))
+			{
+				deviceData.matched_shaders.emplace(groupHandle, unordered_set<uint32_t>());
+			}
+			deviceData.matched_shaders[groupHandle].insert(shaderHash);
+		}
+		if (deviceData.matched_shaders[groupHandle].size() == group.getPixelShaderHashes().size() + group.getVertexShaderHashes().size())
+		{
+			effectActive = true;
+		}
 	}
-	if (blockCall)
+	if (blockCall && effectActive)
 		deviceData.target_shader_active = true;
 	return blockCall;
 }
@@ -407,6 +433,7 @@ static void onPresent(reshade::api::command_queue* queue, swapchain* swapchain,
 	DeviceDataContainer& deviceData = queue->get_device()->get_private_data<DeviceDataContainer>();
 	deviceData.target_shader_active_last_frame = deviceData.target_shader_active;
 	deviceData.target_shader_active = false;
+	deviceData.matched_shaders.clear();
 }
 	
 
