@@ -81,6 +81,7 @@ static effect_technique target_technique;
 static string target_effect_name = "SuperDepth3D.fx";
 static string target_technique_name = "SuperDepth3D";
 static bool should_hide_marked_shaders = false;
+static bool invert_toggle_behavior = false;
 
 static bool get_config_string(effect_runtime* runtime, const char* section, const char* key, std::string& value)
 {
@@ -179,6 +180,7 @@ static void onInitDevice(device* device)
 {
 	get_config_string(nullptr, "SHADERTOGGLER", "TargetEffectName", target_effect_name);
 	get_config_string(nullptr, "SHADERTOGGLER", "TargetTechniqueName", target_technique_name);
+	reshade::config_get_value(nullptr, "SHADERTOGGLER", "InvertToggleBehavior", invert_toggle_behavior);
 	reshade::config_get_value(nullptr, "SHADERTOGGLER", "HideMarkedShaders", should_hide_marked_shaders);
 	device->create_private_data<DeviceDataContainer>();
 }
@@ -423,7 +425,8 @@ void onReshadeBeginEffects(reshade::api::effect_runtime* runtime, reshade::api::
 {
 	DeviceDataContainer& deviceData = cmd_list->get_device()->get_private_data<DeviceDataContainer>();
 	target_technique = runtime->find_technique(target_effect_name.c_str(), target_technique_name.c_str());
-	runtime->set_technique_state(target_technique, !deviceData.target_shader_active_last_frame);
+	bool new_state = invert_toggle_behavior ? deviceData.target_shader_active_last_frame : !deviceData.target_shader_active_last_frame;
+	runtime->set_technique_state(target_technique, new_state);
 }
 
 static void onPresent(reshade::api::command_queue* queue, swapchain* swapchain,
