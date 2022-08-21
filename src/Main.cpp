@@ -389,12 +389,14 @@ bool blockDrawCallForCommandList(command_list* commandList)
 		uintptr_t groupHandle = reinterpret_cast<uintptr_t>(&group);
 		if (group.isBlockedPixelShader(shaderHash))
 		{
+			std::unique_lock lock(s_mutex);
 			blockCall = true;
 			if (!deviceData.matched_shaders.contains(groupHandle))
 			{
 				deviceData.matched_shaders.emplace(groupHandle, unordered_set<uint32_t>());
 			}
 			deviceData.matched_shaders[groupHandle].insert(shaderHash);
+			lock.unlock();
 		}
 	}
 	shaderHash = g_vertexShaderManager.getShaderHash(commandListData.activeVertexShaderPipeline);
@@ -404,14 +406,17 @@ bool blockDrawCallForCommandList(command_list* commandList)
 		uintptr_t groupHandle = reinterpret_cast<uintptr_t>(&group);
 		if (group.isBlockedVertexShader(shaderHash))
 		{
+			std::unique_lock lock(s_mutex);
 			blockCall = true;
 			if (!deviceData.matched_shaders.contains(groupHandle))
 			{
 				deviceData.matched_shaders.emplace(groupHandle, unordered_set<uint32_t>());
 			}
 			deviceData.matched_shaders[groupHandle].insert(shaderHash);
+			lock.unlock();
 		}
-		if (deviceData.matched_shaders[groupHandle].size() == group.getPixelShaderHashes().size() + group.getVertexShaderHashes().size())
+		if (deviceData.matched_shaders.contains(groupHandle) &&
+			deviceData.matched_shaders[groupHandle].size() == group.getPixelShaderHashes().size() + group.getVertexShaderHashes().size())
 		{
 			effectActive = true;
 		}
